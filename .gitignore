@@ -15,3 +15,4 @@ target
 
 # Ignore the .env file for sensitive information
 api/.env
+api/Cargo.lock

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+actix-cors = "0.7"
 actix-session = { version = "0.10.1", features = ["cookie-session"] }
 actix-web = "4"
 chrono = "0.4.41"
@@ -13,3 +14,4 @@ log = "0.4.27"
 mysql = "26"
 serde = "1.0.219"
 sha2 = "0.10.9"
+argon2 = "0.5"

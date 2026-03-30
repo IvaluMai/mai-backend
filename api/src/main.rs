@@ -1,4 +1,5 @@
 use std::{env};
+use actix_cors::Cors;
 use actix_web::{web, App, HttpServer};
 mod controllers {
     pub mod user_controller;
@@ -53,8 +54,20 @@ async fn main() -> std::io::Result<()> {
     let pool = mysql::Pool::new(builder).unwrap();
     let shared_database = web::Data::new(pool);
 
+    let frontend_origin = env::var("FRONTEND_ORIGIN").unwrap_or_else(|_| "https://localhost:3000".to_string());
+
     HttpServer::new(move || {
+        let cors = Cors::default()
+            .allowed_origin(frontend_origin.as_str())
+            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
+            .allowed_headers(vec![
+                actix_web::http::header::CONTENT_TYPE,
+                actix_web::http::header::AUTHORIZATION,
+            ])
+            .max_age(3600);
+
         App::new()
+            .wrap(cors)
             .app_data(shared_database.clone())
             .configure(api_routes)
     }).bind(server_addr)?
