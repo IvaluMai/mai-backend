@@ -1,3 +1,4 @@
+use actix_session::Session;
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
 
@@ -13,20 +14,20 @@ struct LoginRequest {
     user: user_model::LoginData,
 }
 
-#[derive(Deserialize)]
-struct LogoutRequest {
-    user: user_model::LogoutData,
-}
-
-pub fn user_routes(cfg: &mut web::ServiceConfig) {
+pub fn public_user_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/user")
-            .route("/register",     web::to(register))
-            .route("/login",    web::to(login))
-            .route("/logout",   web::to(logout)),
+            .route("/register", web::to(register))
+            .route("/login",    web::to(login)),
     );
 }
 
+pub fn protected_user_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/user")
+            .route("/logout", web::to(logout)),
+    );
+}
 
 async fn register(
     data: web::Data<mysql::Pool>,
@@ -40,20 +41,19 @@ async fn register(
 
 async fn login(
     data: web::Data<mysql::Pool>,
+    session: Session,
     web::Json(LoginRequest { user: login_data }): web::Json<LoginRequest>,
 ) -> actix_web::Result<impl Responder> {
 
-    let session_token = web::block(move || user_model::login(&data, login_data)).await??;
+    let user_id = web::block(move || user_model::login(&data, login_data)).await??;
 
-    Ok(HttpResponse::Ok().body(session_token))
+    session.insert("user_id", user_id)
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::Ok().finish())
 }
 
-async fn logout(
-    data: web::Data<mysql::Pool>,
-    web::Json(LogoutRequest { user: logout_data }): web::Json<LogoutRequest>,
-) -> actix_web::Result<impl Responder> {
-
-    web::block(move || user_model::logout(&data, logout_data)).await??;
-
-    Ok(HttpResponse::Ok().body("User logged out successfully"))
+async fn logout(session: Session) -> impl Responder {
+    session.purge();
+    HttpResponse::Ok().finish()
 }

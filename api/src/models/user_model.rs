@@ -1,9 +1,8 @@
 use mysql::{params, prelude::*};
-use actix_web::{cookie::Key, http::StatusCode};
+use actix_web::http::StatusCode;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::{rand_core::OsRng, SaltString}};
 use derive_more::{Display, Error, From};
-use serde::{Deserialize};
-use sha2::{Digest, Sha256};
+use serde::Deserialize;
 
 #[derive(Debug, Display, Error, From)]
 pub enum PersistenceError {
@@ -44,7 +43,6 @@ pub(crate) fn register(
     pool: &mysql::Pool,
     register_data: RegisterData,
 ) -> Result<(), PersistenceError> {
-
     let mut conn = pool.get_conn()?;
 
     if check_username_exists(&mut conn, register_data.username.clone()) {
@@ -78,10 +76,11 @@ pub(crate) fn register(
     }
 }
 
+/// Verifies credentials and returns the user's id on success.
 pub(crate) fn login(
     pool: &mysql::Pool,
     login_data: LoginData,
-) -> Result<String, PersistenceError> {
+) -> Result<u64, PersistenceError> {
     let mut conn = pool.get_conn()?;
 
     let user_id = get_user_id_by_username(&mut conn, login_data.username.clone())?;
@@ -93,34 +92,7 @@ pub(crate) fn login(
         .verify_password(login_data.password.as_bytes(), &parsed_hash)
         .map_err(|_| PersistenceError::WrongCredentials)?;
 
-    let session_token = loop {
-        let token: String = Key::generate()
-            .master()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
-        let session_hash: String = Sha256::digest(token.as_bytes())
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
-        if !check_session_token_exists(&mut conn, session_hash) {
-            break token;
-        }
-    };
-
-    let expires_at = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::days(1))
-        .unwrap()
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string();
-
-    let result = insert_user_session(&mut conn, user_id, session_token.clone(), expires_at)?;
-
-    if result > 0 {
-        Ok(session_token)
-    } else {
-        Err(PersistenceError::Unknown)
-    }
+    Ok(user_id)
 }
 
 // users table related
@@ -207,65 +179,9 @@ fn check_email_exists(
         .unwrap_or(false)
 }
 
-// Login and logout related
+// Login related
 #[derive(Debug, Deserialize)]
 pub struct LoginData {
     pub username: String,
     pub password: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LogoutData {
-    pub session_token: String,
-}
-
-pub(crate) fn logout(
-    pool: &mysql::Pool,
-    logout_data: LogoutData,
-) -> Result<(), PersistenceError> {
-    let mut conn = pool.get_conn()?;
-    delete_user_session(&mut conn, logout_data.session_token)
-}
-
-fn insert_user_session (
-    conn: &mut mysql::PooledConn,
-    user_id: u64,
-    session_token: String,
-    expires_at: String,
-) -> mysql::error::Result<u64> {
-    conn.exec_drop(
-        "INSERT INTO user_sessions (user_id, session_token, expires_at)
-        VALUES (:user_id, :session_token, :expires_at)",
-        params! {
-            "user_id"       => user_id,
-            "session_token" => session_token,
-            "expires_at"    => expires_at,
-        },
-    ).map(|_| conn.last_insert_id())
-}
-
-fn delete_user_session(
-    conn: &mut mysql::PooledConn,
-    session_token: String,
-) -> Result<(), PersistenceError> {
-    conn.exec_drop(
-        "DELETE FROM user_sessions WHERE session_token = :session_token",
-        params! {
-            "session_token" => session_token,
-        },
-    )?;
-    Ok(())
-}
-
-fn check_session_token_exists(
-    conn: &mut mysql::PooledConn,
-    session_token: String,
-) -> bool {
-    conn.exec_first(
-        "SELECT EXISTS(SELECT session_token FROM users WHERE session_token = :session_token)",
-        params! {
-            "session_token" => session_token,
-        },
-    ).map(|result: Option<(u8,)>| result.map_or(false, |(exists,)| exists == 1))
-        .unwrap_or(false)
 }
